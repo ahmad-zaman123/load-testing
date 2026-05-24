@@ -117,12 +117,27 @@ class CartWriteUser(AuthenticatedHttpUser):
 
     @task(2)
     def sync_cart(self):
-        if self._cart_id is None:
+        if self._cart_id is None or not self._cart_item_ids:
             return
-        self.client.post(
+        # Backend expects a list of {id, quantity} objects (the client's view
+        # of which items + quantities should be in the active cart). The sync
+        # endpoint deletes any active items NOT in this payload, so cached
+        # cart_item_ids may go stale between calls in a flat-weighted scenario.
+        payload = [
+            {"id": item_id, "quantity": random.randint(1, 3)}
+            for item_id in self._cart_item_ids[:10]
+        ]
+        with self.client.post(
             f"/shop/cart/{self._cart_id}/sync/",
+            json=payload,
             name="POST /shop/cart/[id]/sync/",
-        )
+            catch_response=True,
+        ) as r:
+            if r.status_code == 400:
+                # Stale item id (already deleted by a prior sync) — accept and
+                # clear cache so the next add_product re-populates fresh ids.
+                r.success()
+                self._cart_item_ids = []
 
     @task(1)
     def add_recipe_to_cart(self):

@@ -113,9 +113,11 @@ class MealPlannerTasks(SequentialTaskSet):
         if not self.slot_ids:
             return
         slot = random.choice(self.slot_ids)
-        # This dispatches refresh_user_meal_planning_task on Celery default queue
+        # Backend requires servings_multiplier in (0.5, 1.0, 1.5)
+        # Dispatches refresh_user_meal_planning_task on Celery default queue
         self.client.post(
             f"/meal-planner/today/slots/{slot}/mark-eaten/",
+            json={"servings_multiplier": random.choice(["0.5", "1.0", "1.5"])},
             name="05 POST /meal-planner/today/slots/[id]/mark-eaten/",
         )
 

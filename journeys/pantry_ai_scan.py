@@ -51,30 +51,36 @@ class PantryScanTasks(SequentialTaskSet):
 
     @task
     def upload_scan_images(self):
-        """Real user uploads 1-4 photos in one session. We loop the upload
-        endpoint for that many images."""
+        """Real user uploads 1-4 photos in one session. Backend accepts a
+        single multipart request with a LIST under field name `images`
+        (not multiple separate POSTs with `image` singular)."""
         num_images = random.randint(1, 4)
-        for i in range(num_images):
-            png = _tiny_png_bytes()
-            files = {"image": (f"pantry-{uuid.uuid4().hex[:8]}.png", io.BytesIO(png), "image/png")}
-            with self.client.post(
-                "/pantry/scan/",
-                files=files,
-                name="02 POST /pantry/scan/ (image upload)",
-                catch_response=True,
-            ) as r:
-                if r.status_code not in (200, 201, 202):
-                    # Could be a payload-shape mismatch — note but don't abort
-                    r.failure(f"scan upload returned {r.status_code}")
-                    continue
-                self.images_uploaded += 1
-                try:
-                    body = r.json()
-                    if self.scan_session_id is None:
-                        # First upload returns the new scan session
-                        self.scan_session_id = body.get("id") or body.get("scan_session_id")
-                except ValueError:
-                    pass
+        files = [
+            (
+                "images",
+                (
+                    f"pantry-{uuid.uuid4().hex[:8]}.png",
+                    io.BytesIO(_tiny_png_bytes()),
+                    "image/png",
+                ),
+            )
+            for _ in range(num_images)
+        ]
+        with self.client.post(
+            "/pantry/scan/",
+            files=files,
+            name="02 POST /pantry/scan/ (image upload)",
+            catch_response=True,
+        ) as r:
+            if r.status_code not in (200, 201, 202):
+                r.failure(f"scan upload returned {r.status_code}")
+                return
+            self.images_uploaded = num_images
+            try:
+                body = r.json()
+                self.scan_session_id = body.get("scan_id") or body.get("id")
+            except ValueError:
+                pass
 
     # --- step 3: user waits + polls scan status -----------------------
 

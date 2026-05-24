@@ -85,6 +85,7 @@ class TodayPlanUser(AuthenticatedHttpUser):
             return
         self.client.post(
             f"/meal-planner/today/slots/{slot_id}/mark-eaten/",
+            json={"servings_multiplier": random.choice(["0.5", "1.0", "1.5"])},
             name="POST /meal-planner/today/slots/[id]/mark-eaten/",
         )
 

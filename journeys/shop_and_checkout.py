@@ -198,24 +198,38 @@ class ShopAndCheckoutTasks(SequentialTaskSet):
 
     @task
     def sync_cart(self):
-        if self.cart_id is None:
+        if self.cart_id is None or not self.cart_item_ids:
             return
+        # Backend expects a list of {id, quantity} objects (the client's
+        # snapshot of which items should remain active in the cart).
+        payload = [
+            {"id": item_id, "quantity": random.randint(1, 3)}
+            for item_id in self.cart_item_ids[:10]
+        ]
         self.client.post(
             f"/shop/cart/{self.cart_id}/sync/",
+            json=payload,
             name="09 POST /shop/cart/[id]/sync/",
         )
 
     @task
     def go_to_walmart_checkout(self):
-        if self.cart_id is None:
+        if self.cart_id is None or not self.cart_item_ids:
             return
-        # This endpoint builds the Walmart-affiliate URL; doesn't actually
-        # post to Walmart. Mocked or not, it's a read-only computation.
-        self.client.post(
+        # Endpoint expects cart_id + cart_item_ids list; returns 400 if none
+        # of the items are Walmart-sourced products (a realistic scenario for
+        # a load test against random seeded products — we catch_response that
+        # 400 since it's a data-shape constraint, not a perf issue).
+        with self.client.post(
             "/shop/cart/walmart-checkout/",
-            json={"cart_id": self.cart_id},
+            json={"cart_id": self.cart_id, "cart_item_ids": self.cart_item_ids[:10]},
             name="10 POST /shop/cart/walmart-checkout/",
-        )
+            catch_response=True,
+        ) as r:
+            if r.status_code == 400:
+                # "No Walmart-eligible products" is fine — we still measured
+                # the endpoint's response time, which is the point.
+                r.success()
 
     @task
     def end(self):
