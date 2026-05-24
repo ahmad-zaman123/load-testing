@@ -15,11 +15,14 @@ without touching staging.
 
 - [ ] The backend (`easychef-backend`) is running locally (`make up.d` in
       that repo) with `LOAD_TEST_MODE=true` in its `.env`.
-- [ ] You have a Python venv with `pip install -r requirements.txt`.
-- [ ] `tokens.json` exists in `fixtures/` — either copy from the backend's
-      `easychef/load_testing/locust/fixtures/tokens.json` after running
-      its seed command, or run the seed on local backend and `cp` from
-      the container volume.
+- [ ] You have a Python venv with `pip install -r requirements.txt`,
+      OR Docker for running the official locust image (`locustio/locust`).
+- [ ] `fixtures/tokens.json` exists. Generate via:
+      ```bash
+      docker exec -i easychef-dc01 python manage.py shell \
+          < scripts/seed_users.py
+      docker cp easychef-dc01:/tmp/load_test_tokens.json fixtures/tokens.json
+      ```
 
 ### 1.2 Smoke
 
@@ -70,11 +73,10 @@ sleep 10
 docker logs $(docker ps --filter name=django --format '{{.Names}}' | head -1) 2>&1 \
   | grep "applied 12/12 external-client mocks"
 
-# 3. Seed users
-make dcshell
-python manage.py seed_load_test_users --count 500
-exit
-exit
+# 3. Seed users via the harness script (run on staging VM)
+LOAD_TEST_COUNT=500 LOAD_TEST_PANTRY_ITEMS=20 \
+    docker exec -i easychef-dc01 python manage.py shell \
+    < /path/to/easychef-load-tests/scripts/seed_users.py
 ```
 
 If you don't see `applied 12/12 external-client mocks` → **stop and debug**.
@@ -83,8 +85,11 @@ Real external API calls would fire otherwise.
 ### 2.3 Pull the fixture to your laptop
 
 ```bash
-scp staging-host:~/easychef-backend/easychef/load_testing/locust/fixtures/tokens.json \
-    fixtures/tokens.json
+# First copy out of the container to the staging host
+ssh staging-host "docker cp easychef-dc01:/tmp/load_test_tokens.json /tmp/"
+
+# Then to your laptop
+scp staging-host:/tmp/load_test_tokens.json fixtures/tokens.json
 ```
 
 ### 2.4 First staging smoke
@@ -126,9 +131,10 @@ Runs Scenarios A, B, C, D1 back-to-back at 100 users each.
 
 ```bash
 ssh staging-host
-make dcshell
-python manage.py teardown_load_test_users
-exit
+
+# Run the harness teardown script via shell_plus
+docker exec -i easychef-dc01 python manage.py shell \
+    < /path/to/easychef-load-tests/scripts/teardown_users.py
 
 # Drop LOAD_TEST_MODE
 # (remove the LOAD_TEST_MODE=true line from .env.do.stage)
