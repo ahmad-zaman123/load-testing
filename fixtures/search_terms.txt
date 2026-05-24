@@ -1,0 +1,20 @@
+chicken
+pasta
+salad
+rice
+beef
+vegetarian
+soup
+breakfast
+smoothie
+salmon
+curry
+tofu
+quinoa
+tomato
+egg
+pizza
+cake
+bread
+cookies
+stir fry

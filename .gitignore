@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+results/
+fixtures/tokens.json
+config/*.env
+!config/*.env.example
+.DS_Store
+.idea/
+.vscode/
