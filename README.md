@@ -21,8 +21,13 @@ loopback networking hide real bottlenecks.
 │   ├── scenario_c_writes.py
 │   └── scenario_d_auth_spike.py
 ├── journeys/                         sequential user-flow journeys
-│   ├── returning_user_cook.py        works today w/ seeded tokens
-│   └── onboarding_to_first_cook.py   needs backend OTP shortcut
+│   ├── returning_user_cook.py        browse → cook → review (works w/ seeded tokens)
+│   ├── onboarding_to_first_cook.py   register → OTP → onboarding → first cook (needs OTP shortcut)
+│   ├── recipe_import_from_url.py     paste URL → wait → see in list (etl-bound)
+│   ├── pantry_ai_scan.py             upload images → poll → bulk add
+│   ├── returning_meal_planner.py     today → add slot → mark eaten → weekly stats
+│   ├── shop_and_checkout.py          search → add to cart → adjust → checkout
+│   └── reviewer.py                   cook + review 3-8 recipes in one session
 ├── fixtures/                         tokens.json (generated, gitignored)
 │   └── search_terms.txt
 ├── config/                           env templates per environment

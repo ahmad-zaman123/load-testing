@@ -11,9 +11,14 @@ Flat scenarios (random weighted tasks):
     SCENARIO=combined     A + B + C user classes loaded together
 
 Chain journeys (sequential user flows):
-    SCENARIO=journey-cook         returning user: browse → cook → review (works with seeded users)
-    SCENARIO=journey-onboarding   new user: register → OTP → onboarding → first cook
-                                  (requires backend OTP shortcut — see docs/backend-contract.md)
+    SCENARIO=journey-cook            returning user: browse → cook → review
+    SCENARIO=journey-onboarding      new user: register → OTP → onboarding → first cook
+                                     (requires backend OTP shortcut — see docs/backend-contract.md)
+    SCENARIO=journey-import          paste URL → wait → see recipe in list (etl-bound)
+    SCENARIO=journey-pantry-scan     upload images → poll status → bulk add to pantry
+    SCENARIO=journey-meal-planner    open today → add slot → mark eaten → weekly stats
+    SCENARIO=journey-shop            search → open recipe → add to cart → adjust → checkout
+    SCENARIO=journey-reviewer        power user: cook + review 3-8 recipes in one session
 
 Examples:
     SCENARIO=a locust -f locustfile.py --host=https://staging-api --headless
@@ -63,11 +68,23 @@ elif SCENARIO in ("journey-cook", "cook"):
     from journeys.returning_user_cook import ReturningUserCookUser  # noqa: F401
 elif SCENARIO in ("journey-onboarding", "onboarding"):
     from journeys.onboarding_to_first_cook import OnboardingToFirstCookUser  # noqa: F401
+elif SCENARIO in ("journey-import", "import"):
+    from journeys.recipe_import_from_url import RecipeImportUser  # noqa: F401
+elif SCENARIO in ("journey-pantry-scan", "pantry-scan"):
+    from journeys.pantry_ai_scan import PantryScanUser  # noqa: F401
+elif SCENARIO in ("journey-meal-planner", "meal-planner"):
+    from journeys.returning_meal_planner import ReturningMealPlannerUser  # noqa: F401
+elif SCENARIO in ("journey-shop", "shop"):
+    from journeys.shop_and_checkout import ShopAndCheckoutUser  # noqa: F401
+elif SCENARIO in ("journey-reviewer", "reviewer"):
+    from journeys.reviewer import ReviewerUser  # noqa: F401
 
 else:
     raise SystemExit(
         f"Unknown SCENARIO={SCENARIO!r}. Expected one of: "
-        "a, b, c, c_full, d1, d2, d3, combined, journey-cook, journey-onboarding.",
+        "a, b, c, c_full, d1, d2, d3, combined, "
+        "journey-cook, journey-onboarding, journey-import, "
+        "journey-pantry-scan, journey-meal-planner, journey-shop, journey-reviewer.",
     )
 
 
