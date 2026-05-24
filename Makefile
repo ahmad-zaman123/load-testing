@@ -11,6 +11,8 @@ help:
 	@echo "  install         pip install -r requirements.txt"
 	@echo "  smoke           quick 5-user / 60s read-only run (Scenario A)"
 	@echo "  ramp            full stepped ramp (UnifiedSteppedRamp, ~24 min)"
+	@echo "  sustained       Phase 2 autoscaling test (SustainedLoadShape; default ~38 min)"
+	@echo "                  Env: SUSTAIN_USERS, SUSTAIN_MINUTES, RAMPUP_MINUTES, RAMPDOWN_MINUTES"
 	@echo "  journey-cook            returning-user cook journey"
 	@echo "  journey-onboarding      new-user registration → onboarding → first cook (needs backend OTP hack)"
 	@echo "  journey-import          paste recipe URL → poll → see in list (etl-bound)"
@@ -38,6 +40,12 @@ ramp:
 	SCENARIO=a locust -f locustfile.py \
 	    --host=$(HOST) --headless \
 	    --html=$(RESULTS_DIR)/ramp.html --csv=$(RESULTS_DIR)/ramp
+
+sustained:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=$(or $(SCENARIO),a) LOAD_TEST_SHAPE=sustained locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --html=$(RESULTS_DIR)/sustained.html --csv=$(RESULTS_DIR)/sustained
 
 journey-cook:
 	mkdir -p $(RESULTS_DIR)

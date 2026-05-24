@@ -88,13 +88,17 @@ else:
     )
 
 
-# Shape selection. Default = unified stepped ramp. Override with
-# LOAD_TEST_SHAPE=spike for Scenario D, or LOAD_TEST_NO_SHAPE=1 for smoke runs.
+# Shape selection. Default = unified stepped ramp.
+#   LOAD_TEST_SHAPE=spike       → SpikeShape (Scenario D)
+#   LOAD_TEST_SHAPE=sustained   → SustainedLoadShape (Phase 2 autoscaling test)
+#   LOAD_TEST_NO_SHAPE=1        → no shape; --users/--spawn-rate/--run-time take effect
 _shape_choice = os.environ.get("LOAD_TEST_SHAPE", "ramp").lower()
 _skip_shape = os.environ.get("LOAD_TEST_NO_SHAPE") in ("1", "true", "yes")
 
 if not _skip_shape:
     if _shape_choice == "spike":
         from shapes import SpikeShape  # noqa: F401
+    elif _shape_choice == "sustained":
+        from shapes import SustainedLoadShape  # noqa: F401
     else:
         from shapes import UnifiedSteppedRamp  # noqa: F401
