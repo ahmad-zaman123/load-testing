@@ -1,4 +1,7 @@
-.PHONY: install smoke ramp journey-cook scenarios-all clean help
+.PHONY: install seed teardown watch-db smoke ramp pantry-read-smoke pantry-read-ramp reads-smoke reads-ramp reads-all-smoke reads-all-ramp reads-sweep journey-cook scenarios-all clean help
+
+# Apps with a read-only scenario, used by reads-sweep.
+READ_APPS ?= recipes products ingredients cookbooks pantry meal-planner communications shop users
 
 HOST ?= http://localhost:8000
 USERS ?= 5
@@ -7,10 +10,21 @@ SPAWN_RATE ?= 1
 RESULTS_DIR ?= results
 
 help:
+	@echo "Setup (source config/<env>.env first, or pass ENV=<name>):"
+	@echo "  seed            seed users into the target backend + pull tokens.json"
+	@echo "  teardown        delete the load-test users (LOAD_TEST_DRY_RUN=1 previews)"
+	@echo "  watch-db        sample DB connection usage during a run (needs DATABASE_URL)"
+	@echo ""
 	@echo "Targets:"
 	@echo "  install         pip install -r requirements.txt"
 	@echo "  smoke           quick 5-user / 60s read-only run (Scenario A)"
 	@echo "  ramp            full stepped ramp (UnifiedSteppedRamp, ~24 min)"
+	@echo "  pantry-read-smoke   quick 5-user / 60s pantry read run (Scenario E)"
+	@echo "  pantry-read-ramp    full stepped ramp over pantry read endpoints (Scenario E)"
+	@echo "  reads-smoke READS=<app>   quick read smoke for one app (recipes|products|...)"
+	@echo "  reads-ramp  READS=<app>   stepped ramp over one app's read endpoints"
+	@echo "  reads-all-smoke / reads-all-ramp   all apps' reads loaded together"
+	@echo "  reads-sweep         baseline every app's reads back-to-back (READ_APPS)"
 	@echo "  sustained       Phase 2 autoscaling test (SustainedLoadShape; default ~38 min)"
 	@echo "                  Env: SUSTAIN_USERS, SUSTAIN_MINUTES, RAMPUP_MINUTES, RAMPDOWN_MINUTES"
 	@echo "  journey-cook            returning-user cook journey"
@@ -28,6 +42,22 @@ help:
 install:
 	pip install -r requirements.txt
 
+# --- environment setup (config-driven) ---------------------------------------
+# `source config/<env>.env` first (so HOST/SSH_HOST/... are exported), then:
+#   make seed        seed users into the target backend + pull fixtures/tokens.json
+#   make teardown    delete the load-test users (LOAD_TEST_DRY_RUN=1 to preview)
+#   make watch-db    sample DB connection usage during a run (needs DATABASE_URL)
+# Or skip sourcing and point at a file: make seed ENV=staging
+
+seed:
+	@scripts/seed.sh $(if $(ENV),--env config/$(ENV).env,)
+
+teardown:
+	@scripts/teardown.sh $(if $(ENV),--env config/$(ENV).env,)
+
+watch-db:
+	@scripts/watch_db.sh $(if $(ENV),--env config/$(ENV).env,)
+
 smoke:
 	mkdir -p $(RESULTS_DIR)
 	SCENARIO=a LOAD_TEST_NO_SHAPE=1 locust -f locustfile.py \
@@ -40,6 +70,59 @@ ramp:
 	SCENARIO=a locust -f locustfile.py \
 	    --host=$(HOST) --headless \
 	    --html=$(RESULTS_DIR)/ramp.html --csv=$(RESULTS_DIR)/ramp
+
+pantry-read-smoke:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=e LOAD_TEST_NO_SHAPE=1 locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --users $(USERS) --spawn-rate $(SPAWN_RATE) --run-time $(RUN_TIME) \
+	    --html=$(RESULTS_DIR)/pantry_read_smoke.html --csv=$(RESULTS_DIR)/pantry_read_smoke
+
+pantry-read-ramp:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=e locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --html=$(RESULTS_DIR)/pantry_read_ramp.html --csv=$(RESULTS_DIR)/pantry_read_ramp
+
+# Read-only single-app run. Pick the app with READS=<app>, e.g. READS=recipes.
+# Smoke = fixed --users/--run-time (no shape); ramp = stepped ramp (cap with MAX_USERS).
+reads-smoke:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=reads-$(READS) LOAD_TEST_NO_SHAPE=1 locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --users $(USERS) --spawn-rate $(SPAWN_RATE) --run-time $(RUN_TIME) \
+	    --html=$(RESULTS_DIR)/reads_$(READS)_smoke.html --csv=$(RESULTS_DIR)/reads_$(READS)_smoke
+
+reads-ramp:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=reads-$(READS) locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --html=$(RESULTS_DIR)/reads_$(READS)_ramp.html --csv=$(RESULTS_DIR)/reads_$(READS)_ramp
+
+reads-all-smoke:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=reads-all LOAD_TEST_NO_SHAPE=1 locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --users $(USERS) --spawn-rate $(SPAWN_RATE) --run-time $(RUN_TIME) \
+	    --html=$(RESULTS_DIR)/reads_all_smoke.html --csv=$(RESULTS_DIR)/reads_all_smoke
+
+reads-all-ramp:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=reads-all locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --html=$(RESULTS_DIR)/reads_all_ramp.html --csv=$(RESULTS_DIR)/reads_all_ramp
+
+# Baseline every app's read scenario back-to-back (Phase-1 per-app sweep).
+reads-sweep:
+	mkdir -p $(RESULTS_DIR)
+	@for app in $(READ_APPS); do \
+	    echo "=== reads-$$app ($(USERS) users, $(RUN_TIME)) ==="; \
+	    SCENARIO=reads-$$app LOAD_TEST_NO_SHAPE=1 locust -f locustfile.py \
+	        --host=$(HOST) --headless \
+	        --users $(USERS) --spawn-rate $(SPAWN_RATE) --run-time $(RUN_TIME) \
+	        --html=$(RESULTS_DIR)/reads_$$app.html --csv=$(RESULTS_DIR)/reads_$$app \
+	        || echo "  (reads-$$app exited non-zero — see report)"; \
+	done
 
 sustained:
 	mkdir -p $(RESULTS_DIR)

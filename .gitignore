@@ -9,3 +9,6 @@ config/*.env
 .DS_Store
 .idea/
 .vscode/
+
+# Local Claude Code harness config (per-machine; not project source)
+.claude/

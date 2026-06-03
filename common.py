@@ -12,7 +12,7 @@ import random
 from pathlib import Path
 from typing import Dict, List
 
-from locust import HttpUser, events
+from locust import HttpUser, between, constant, events
 
 
 TOKEN_FIXTURE_ENV = "LOAD_TEST_TOKEN_FIXTURE"
@@ -63,6 +63,44 @@ def pick_random_token() -> Dict[str, str]:
             "Token pool is empty. Did the @events.init listener run?",
         )
     return random.choice(_token_pool)
+
+
+def read_wait():
+    """wait_time for the read scenarios, overridable via LOAD_TEST_WAIT.
+
+        unset        -> between(1, 4)   realistic think-time (default)
+        "0"          -> constant(0)     no think-time; #users == in-flight concurrency
+        "0.5"        -> constant(0.5)
+        "1,4"        -> between(1, 4)
+
+    Set LOAD_TEST_WAIT=0 when you want concurrency to mean "N requests in
+    flight at once" (e.g. finding the saturation knee), instead of N users
+    each idling between calls.
+    """
+    raw = os.environ.get("LOAD_TEST_WAIT")
+    if raw is None:
+        return between(1.0, 4.0)
+    parts = [float(x) for x in raw.split(",") if x.strip()]
+    if len(parts) == 1:
+        return constant(parts[0])
+    return between(parts[0], parts[1])
+
+
+_DEFAULT_SEARCH_TERMS = ("chicken", "pasta", "salad", "rice", "beef")
+
+
+def load_search_terms() -> List[str]:
+    """Load search terms from fixtures/search_terms.txt (one per line).
+
+    Used by the read scenarios to vary ?search= queries. Falls back to a
+    small built-in list if the fixture is missing.
+    """
+    path = Path.cwd() / "fixtures" / "search_terms.txt"
+    if path.exists():
+        terms = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+        if terms:
+            return terms
+    return list(_DEFAULT_SEARCH_TERMS)
 
 
 def token_pool_size() -> int:

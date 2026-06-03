@@ -42,6 +42,7 @@ from django.db import transaction
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from easychef.pantry.models import PantryItem
+from easychef.products.choices import ProductStatus
 from easychef.products.models import Product
 from easychef.users.choices import (
     HealthFocusType,
@@ -109,9 +110,18 @@ def ensure_users(count):
 
 
 def ensure_pantry(users, per_user):
-    product_ids = list(Product.objects.values_list("id", flat=True)[:2000])
+    # Draw from APPROVED products only: the pantry read endpoints filter to
+    # APPROVED (or the user's own NEW) products, so seeding non-approved items
+    # would create rows that never show up in /pantry/list/. Pull a wide pool
+    # (10x per_user, capped) so users get varied pantries rather than all
+    # drawing from the same first-N slice.
+    pool_size = max(2000, per_user * 10)
+    product_ids = list(
+        Product.objects.filter(status=ProductStatus.APPROVED)
+        .values_list("id", flat=True)[:pool_size]
+    )
     if not product_ids:
-        print("  No Products in DB — skipping pantry seeding.")
+        print("  No APPROVED Products in DB — skipping pantry seeding.")
         return
     print(f"  Ensuring ~{per_user} pantry items per user (pool: {len(product_ids)})...")
     total = 0

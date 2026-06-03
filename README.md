@@ -30,60 +30,81 @@ loopback networking hide real bottlenecks.
 │   └── reviewer.py                   cook + review 3-8 recipes in one session
 ├── fixtures/                         tokens.json (generated, gitignored)
 │   └── search_terms.txt
-├── config/                           env templates per environment
-│   ├── staging.env.example
-│   └── prod.env.example
+├── config/                           env templates — copy to <name>.env, fill in
+│   ├── local.env.example             local docker backend
+│   └── staging.env.example           remote backend over SSH
+├── scripts/
+│   ├── seed.sh / teardown.sh         env-driven seed/teardown (local OR remote SSH)
+│   ├── watch_db.sh                   sample DB connections during a run
+│   └── seed_users.py / teardown_users.py   run inside the backend's Django shell
 └── docs/
     └── backend-contract.md           endpoints, payloads, auth shapes
 ```
 
-## Setup
+## Quickstart
+
+A fresh clone only needs **one env file** filled in — everything else is
+driven from it.
 
 ```bash
-git clone <this repo>
-cd easychef-load-tests
+git clone <this repo> && cd easychef-load-tests
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+
+# 1. Create your env file from a template and fill in the blanks.
+cp config/local.env.example config/local.env      # or staging.env.example
+$EDITOR config/local.env
+
+# 2. Load it (exports HOST, SSH_HOST, container name, seed tuning, ...).
+source config/local.env
+
+# 3. Seed users into the target backend + pull fixtures/tokens.json locally.
+make seed
+
+# 4. Run.
+make reads-all-smoke      # or: make smoke / make reads-all-ramp / ...
 ```
 
-## Get a tokens.json fixture
+`make seed` figures out *where* the backend is from your env file:
 
-The backend deliberately has no `seed_load_test_users` command — seeding
-logic lives here, in `scripts/seed_users.py`, and is exec'd inside the
-backend's Django shell to use its ORM directly.
+- **`SSH_HOST` empty** → backend runs in docker on this machine; it uses
+  `docker exec` directly.
+- **`SSH_HOST` set** → it runs the seed over SSH (`ssh <host> docker exec ...`)
+  and `scp`s the resulting `tokens.json` back into `fixtures/`.
+
+Either way it runs `scripts/seed_users.py` **inside the backend's Django
+shell** — seeding needs the ORM and model signals, so it goes through Django,
+not a direct DB connection. (`DATABASE_URL` in the env file is only for the
+optional `make watch-db` monitor, never for seeding.)
+
+Prefer not to `source`? Point any setup target at a file instead:
 
 ```bash
-# 1. SSH to the backend host (staging or local dev)
-ssh staging-host
-
-# 2. Pipe the seed script into Django shell inside the Django container
-LOAD_TEST_COUNT=500 LOAD_TEST_PANTRY_ITEMS=20 \
-    docker exec -i easychef-dc01 python manage.py shell \
-    < ../easychef-load-tests/scripts/seed_users.py
-
-# 3. Copy the resulting fixture out of the container into this repo
-docker cp easychef-dc01:/tmp/load_test_tokens.json fixtures/tokens.json
-
-# 4. (If running Locust from a different machine — your laptop)
-scp staging-host:/tmp/load_test_tokens.json fixtures/tokens.json
+make seed ENV=staging                 # = scripts/seed.sh --env config/staging.env
+make teardown ENV=staging             # delete the load-test users
+LOAD_TEST_DRY_RUN=1 make teardown ENV=staging   # preview first
 ```
 
-Cleanup later with:
-
-```bash
-docker exec -i easychef-dc01 python manage.py shell \
-    < scripts/teardown_users.py
-```
-
-Env vars `LOAD_TEST_COUNT`, `LOAD_TEST_PANTRY_ITEMS`, `LOAD_TEST_OUTPUT`
-let you tune count, pantry depth, and output path. See `scripts/seed_users.py`
-docstring for details.
+Tune the seed with `LOAD_TEST_COUNT` / `LOAD_TEST_PANTRY_ITEMS` in the env
+file. Pantry reads filter to APPROVED products, so `seed_users.py` draws from
+the approved pool — set `LOAD_TEST_PANTRY_ITEMS=110` to get ~100+ items
+actually visible per user.
 
 ## Run something
+
+With `config/<env>.env` sourced, `HOST`/`USERS`/etc come from it, so the
+commands shorten to `make <target>`. You can still override any of them on the
+CLI (shown explicitly below).
 
 ```bash
 # Quick local smoke (read-only, 5 users, 60s):
 make smoke HOST=http://localhost:8000
+
+# Every app's read endpoints, stepped 10→50 (after `source config/local.env`):
+make reads-all-ramp
+
+# One app's reads in isolation:
+make reads-ramp READS=recipes
 
 # Returning-user cook journey, 50 users, 3 min:
 make journey-cook HOST=https://staging-api USERS=50 RUN_TIME=3m
@@ -115,8 +136,9 @@ Both have their place.
 - `LOAD_TEST_MODE=true` must be set on the backend before running write
   scenarios or journeys. It mocks all 12 external clients (LLM, FCM, OAuth,
   scraper, etc.) so the load test doesn't fire real API calls.
-- `seed_load_test_users` must have been run there so `tokens.json` has
-  valid identities.
+- `make seed` must have been run so `fixtures/tokens.json` holds identities
+  that exist in the target environment's DB. Stale tokens (e.g. after a DB
+  reset) surface as `401 user_not_found` — just re-run `make seed`.
 - For `journey-onboarding`, the backend additionally needs a deterministic
   OTP shortcut (see `docs/backend-contract.md` § Known friction points).
 

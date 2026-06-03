@@ -16,9 +16,17 @@ class UnifiedSteppedRamp(LoadTestShape):
     """Stepped ramp shared across Scenarios A, B, C, and the Combined Run.
 
     `duration` is cumulative seconds from run start, not the length of a step.
+
+    Env-configurable:
+        MAX_USERS       cap the ramp — stops after the last stage at or below this
+                        concurrency (0 = uncapped, run all stages).
+        RAMP_STEPS      comma-separated user counts to override the stages, e.g.
+                        "10,20,30,40,50". Each step holds for RAMP_STEP_SECS.
+                        Useful for finding the per-journey concurrency knee.
+        RAMP_STEP_SECS  seconds to hold each RAMP_STEPS level (default 90).
     """
 
-    stages = (
+    default_stages = (
         {"duration": 180, "users": 10, "spawn_rate": 5},
         {"duration": 360, "users": 50, "spawn_rate": 10},
         {"duration": 540, "users": 100, "spawn_rate": 15},
@@ -27,9 +35,25 @@ class UnifiedSteppedRamp(LoadTestShape):
         {"duration": 1440, "users": 1000, "spawn_rate": 50},
     )
 
+    def __init__(self):
+        super().__init__()
+        self.max_users = int(os.environ.get("MAX_USERS", "0"))
+        steps = os.environ.get("RAMP_STEPS", "").strip()
+        if steps:
+            secs = int(os.environ.get("RAMP_STEP_SECS", "90"))
+            users_list = [int(x) for x in steps.split(",") if x.strip()]
+            self.stages = tuple(
+                {"duration": secs * (i + 1), "users": u, "spawn_rate": max(5, u // 5)}
+                for i, u in enumerate(users_list)
+            )
+        else:
+            self.stages = self.default_stages
+
     def tick(self):
         run_time = self.get_run_time()
         for stage in self.stages:
+            if self.max_users and stage["users"] > self.max_users:
+                return None
             if run_time < stage["duration"]:
                 return (stage["users"], stage["spawn_rate"])
         return None
