@@ -4,6 +4,7 @@ __pycache__/
 venv/
 results/
 fixtures/tokens.json
+fixtures/tokens.*.json
 config/*.env
 !config/*.env.example
 .DS_Store
