@@ -1,7 +1,10 @@
-.PHONY: install seed teardown watch-db smoke ramp pantry-read-smoke pantry-read-ramp reads-smoke reads-ramp reads-all-smoke reads-all-ramp reads-sweep journey-cook scenarios-all clean help
+.PHONY: install seed teardown watch-db watch-stats smoke ramp pantry-read-smoke pantry-read-ramp reads-smoke reads-ramp reads-all-smoke reads-all-ramp reads-sweep cat-smoke cat-ramp cat-sweep journey-cook scenarios-all clean help
 
 # Apps with a read-only scenario, used by reads-sweep.
 READ_APPS ?= recipes products ingredients cookbooks pantry meal-planner communications shop users
+
+# Load classes (cat-* scenarios), used by cat-sweep.
+CAT_CLASSES ?= light medium heavy
 
 HOST ?= http://localhost:8000
 USERS ?= 5
@@ -14,6 +17,7 @@ help:
 	@echo "  seed            seed users into the target backend + pull tokens.json"
 	@echo "  teardown        delete the load-test users (LOAD_TEST_DRY_RUN=1 previews)"
 	@echo "  watch-db        sample DB connection usage during a run (needs DATABASE_URL)"
+	@echo "  watch-stats     sample per-container CPU/memory during a run (needs SSH_HOST)"
 	@echo ""
 	@echo "Targets:"
 	@echo "  install         pip install -r requirements.txt"
@@ -25,6 +29,10 @@ help:
 	@echo "  reads-ramp  READS=<app>   stepped ramp over one app's read endpoints"
 	@echo "  reads-all-smoke / reads-all-ramp   all apps' reads loaded together"
 	@echo "  reads-sweep         baseline every app's reads back-to-back (READ_APPS)"
+	@echo "  cat-smoke CAT=<class>   quick run for one load class (light|medium|heavy|all)"
+	@echo "  cat-ramp  CAT=<class>   stepped ramp over one load class"
+	@echo "  cat-sweep           run light, medium, heavy isolated back-to-back (CAT_CLASSES)"
+	@echo "                      run scripts/watch_stats.sh alongside to capture CPU/mem"
 	@echo "  sustained       Phase 2 autoscaling test (SustainedLoadShape; default ~38 min)"
 	@echo "                  Env: SUSTAIN_USERS, SUSTAIN_MINUTES, RAMPUP_MINUTES, RAMPDOWN_MINUTES"
 	@echo "  journey-cook            returning-user cook journey"
@@ -57,6 +65,9 @@ teardown:
 
 watch-db:
 	@scripts/watch_db.sh $(if $(ENV),--env config/$(ENV).env,)
+
+watch-stats:
+	@scripts/watch_stats.sh $(if $(ENV),--env config/$(ENV).env,)
 
 smoke:
 	mkdir -p $(RESULTS_DIR)
@@ -122,6 +133,40 @@ reads-sweep:
 	        --users $(USERS) --spawn-rate $(SPAWN_RATE) --run-time $(RUN_TIME) \
 	        --html=$(RESULTS_DIR)/reads_$$app.html --csv=$(RESULTS_DIR)/reads_$$app \
 	        || echo "  (reads-$$app exited non-zero — see report)"; \
+	done
+
+# --- category runs (endpoints grouped by load class) -------------------------
+# Pick the class with CAT=<light|medium|heavy|all>. Smoke = fixed --users (no
+# shape); ramp = stepped ramp. Sample CPU/mem in another terminal with:
+#   make watch-stats ENV=staging
+# For a clean isolation comparison, hold load constant across runs, e.g.:
+#   LOAD_TEST_WAIT=0 RAMP_STEPS=50 RAMP_STEP_SECS=180 make cat-ramp CAT=heavy ENV=staging
+CAT ?= light
+
+cat-smoke:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=cat-$(CAT) LOAD_TEST_NO_SHAPE=1 locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --users $(USERS) --spawn-rate $(SPAWN_RATE) --run-time $(RUN_TIME) \
+	    --html=$(RESULTS_DIR)/cat_$(CAT)_smoke.html --csv=$(RESULTS_DIR)/cat_$(CAT)_smoke
+
+cat-ramp:
+	mkdir -p $(RESULTS_DIR)
+	SCENARIO=cat-$(CAT) locust -f locustfile.py \
+	    --host=$(HOST) --headless \
+	    --html=$(RESULTS_DIR)/cat_$(CAT)_ramp.html --csv=$(RESULTS_DIR)/cat_$(CAT)_ramp
+
+# Isolated sweep: run light, medium, heavy back-to-back (R1, R2, R3) at fixed
+# load. Run `make watch-stats` alongside to capture the per-class resource cost.
+cat-sweep:
+	mkdir -p $(RESULTS_DIR)
+	@for c in $(CAT_CLASSES); do \
+	    echo "=== cat-$$c ($(USERS) users, $(RUN_TIME)) ==="; \
+	    SCENARIO=cat-$$c LOAD_TEST_NO_SHAPE=1 locust -f locustfile.py \
+	        --host=$(HOST) --headless \
+	        --users $(USERS) --spawn-rate $(SPAWN_RATE) --run-time $(RUN_TIME) \
+	        --html=$(RESULTS_DIR)/cat_$$c.html --csv=$(RESULTS_DIR)/cat_$$c \
+	        || echo "  (cat-$$c exited non-zero — see report)"; \
 	done
 
 sustained:

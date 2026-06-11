@@ -23,6 +23,12 @@ Read-only scenarios (one per app — for Phase-1 per-endpoint baselining):
     SCENARIO=reads-users          me/quick-actions/onboarding/documents/chef-profile
     SCENARIO=reads-all            every app's read user class loaded together
 
+Category scenarios (endpoints grouped by load class — for CPU/memory profiling):
+    SCENARIO=cat-light            11 cheap reads (P95 < 1000ms)
+    SCENARIO=cat-medium           16 mid-tier reads (P95 1000-2500ms)
+    SCENARIO=cat-heavy            6 expensive list/aggregation reads (P95 > 2500ms)
+    SCENARIO=cat-all              all three classes loaded together (blended)
+
 Chain journeys (sequential user flows):
     SCENARIO=journey-cook            returning user: browse → cook → review
     SCENARIO=journey-onboarding      new user: register → OTP → onboarding → first cook
@@ -144,6 +150,22 @@ elif SCENARIO == "reads-all":
     from scenarios.scenario_reads_shop import ShopReadUser  # noqa: F401
     from scenarios.scenario_reads_users import UsersReadUser  # noqa: F401
 
+# --- category scenarios (endpoints grouped by load class) --------------------
+
+elif SCENARIO == "cat-light":
+    from scenarios.scenario_categories import LightReadUser  # noqa: F401
+elif SCENARIO == "cat-medium":
+    from scenarios.scenario_categories import MediumReadUser  # noqa: F401
+elif SCENARIO == "cat-heavy":
+    from scenarios.scenario_categories import HeavyReadUser  # noqa: F401
+elif SCENARIO == "cat-all":
+    # All three load classes together — Locust spreads VUs across them, so one
+    # ramp exercises every category at once. Compare its CPU/mem against the
+    # sum of the isolated cat-light/medium/heavy runs to detect contention.
+    from scenarios.scenario_categories import LightReadUser  # noqa: F401
+    from scenarios.scenario_categories import MediumReadUser  # noqa: F401
+    from scenarios.scenario_categories import HeavyReadUser  # noqa: F401
+
 # --- chain journeys ----------------------------------------------------------
 
 elif SCENARIO in ("journey-cook", "cook"):
@@ -168,6 +190,7 @@ else:
         "reads-recipes, reads-products, reads-ingredients, reads-cookbooks, "
         "reads-pantry, reads-meal-planner, reads-communications, reads-shop, "
         "reads-users, reads-all, "
+        "cat-light, cat-medium, cat-heavy, cat-all, "
         "journey-cook, journey-onboarding, journey-import, "
         "journey-pantry-scan, journey-meal-planner, journey-shop, journey-reviewer.",
     )

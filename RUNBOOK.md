@@ -145,6 +145,88 @@ Then announce in `#engineering` that staging is back to normal.
 
 ---
 
+## Part 3 — Category load-class profiling (CPU/memory)
+
+**Goal**: measure how much CPU and memory each *load class* of endpoints
+costs the backend, and detect contention when classes run together. Use this
+after the per-endpoint report has bucketed endpoints into light / medium /
+heavy (P95 @ 100 users):
+
+| Class | P95 @ 100u | Endpoints | Scenario |
+|-------|-----------|-----------|----------|
+| light | < 1000ms | 11 cheap reads | `cat-light` |
+| medium | 1000–2500ms | 16 mid-tier reads | `cat-medium` |
+| heavy | > 2500ms | 6 list/aggregation reads | `cat-heavy` |
+
+Bucket membership is defined in `scenarios/scenario_categories.py`. The 3
+endpoints that fail under load (`users`, `users-document`, `users-me`) are
+excluded — 100% failures skew the comparison.
+
+### 3.1 Pre-flight
+
+- [ ] Backend prepped + users seeded — same as **2.2** and **2.3** (mocks
+      applied, `fixtures/tokens.staging.json` current). Re-seed if stale.
+- [ ] `source config/staging.env` in **both** terminals below.
+- [ ] Run Locust from a machine that is **not** the droplet — otherwise the
+      load generator's CPU contaminates the measurement.
+
+### 3.2 Start the resource sampler (terminal 1)
+
+Leave this running for the whole campaign. It SSHes to the droplet and samples
+every running container's CPU/memory via `docker stats`, appending one CSV row
+per container per tick.
+
+```bash
+STATS_OUT=results/stats.csv WATCH_INTERVAL=5 make watch-stats ENV=staging
+```
+
+CSV columns: `time,container,cpu_perc,mem_usage,mem_perc,net_io,block_io`
+(`cpu_perc` / `mem_perc` have `%` stripped for plotting).
+
+### 3.3 Isolated runs — one class at a time (terminal 2)
+
+`cat-sweep` runs light, then medium, then heavy back-to-back at a fixed load.
+`LOAD_TEST_WAIT=0` removes think-time so `USERS` == in-flight concurrency,
+making the three classes directly comparable under equal pressure.
+
+```bash
+LOAD_TEST_WAIT=0 USERS=50 RUN_TIME=3m make cat-sweep ENV=staging
+```
+
+Each class writes its own `results/cat_<class>.csv` + `.html`. Note the
+wall-clock start/stop of each so you can slice `stats.csv` by window.
+
+To hold a single concurrency level across a longer ramp instead:
+
+```bash
+LOAD_TEST_WAIT=0 RAMP_STEPS=50 RAMP_STEP_SECS=180 make cat-ramp CAT=heavy ENV=staging
+```
+
+### 3.4 Blended run — all classes together
+
+```bash
+LOAD_TEST_WAIT=0 USERS=50 RUN_TIME=3m make cat-smoke CAT=all ENV=staging
+```
+
+Locust spreads the 50 VUs across all three classes at once.
+
+### 3.5 Interpret
+
+- Slice `results/stats.csv` by the time window of each run and by container.
+- **Key comparison**: blended (3.4) CPU/mem vs the **sum** of the three
+  isolated runs (3.3). If blended exceeds the sum, that's contention
+  (worker / DB-connection-pool starvation) — the likely cause of the
+  `meal_planner_history` and `users_*` collapses in the report.
+- **Django vs Postgres**: compare the `easychef-dc01` (uvicorn) container
+  against the postgres container. A heavy class that lights up Postgres CPU
+  is query-bound; one that lights up uvicorn CPU is serialization-bound.
+
+### 3.6 Teardown
+
+Same as **2.8** when the campaign is done.
+
+---
+
 ## Watching during a run
 
 - **Locust live UI** (`http://localhost:8089` when not `--headless`) —
@@ -155,6 +237,9 @@ Then announce in `#engineering` that staging is back to normal.
   every 30s during the run. Staging uses DigitalOcean PgBouncer, so the
   Django-side connection count = PgBouncer client count, not Postgres
   backend count.
+- **CPU / memory** — `make watch-stats ENV=staging` samples every container's
+  CPU/mem on the droplet via `docker stats`, into a CSV. See **Part 3** for
+  the category-profiling workflow that uses it.
 
 ---
 
